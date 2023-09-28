@@ -1,0 +1,175 @@
+name: Builds
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    env:
+      LANG: en_US.UTF-8
+    strategy:
+      fail-fast: false
+      matrix:
+        cache_marker: [ 1 ]
+        platform:
+          - {
+            icon: 🐧,
+            label: Linux,
+            os: ubuntu,
+            shell: bash --noprofile --norc -eo pipefail
+          }
+          - {
+            icon: 🍎,
+            label: macOS,
+            os: macos,
+            shell: bash --noprofile --norc -eo pipefail
+          }
+          - {
+            icon: 🏁,
+            label: Windows,
+            os: windows,
+            shell: msys2
+          }
+        nim_version: [ v1.6.0, version-1-6, version-2-0, devel ]
+    name: ${{ matrix.platform.icon }} ${{ matrix.platform.label }} - Nim ${{ matrix.nim_version }}
+    runs-on: ${{ matrix.platform.os }}-latest
+    defaults:
+      run:
+        shell: ${{ matrix.platform.shell }} {0}
+
+    steps:
+      - name: Install tools and libraries via APT (Linux)
+        if: matrix.platform.os == 'ubuntu'
+        run: |
+          :
+          sudo apt-fast update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-fast install --no-install-recommends -yq \
+            lcov
+
+      - name: Install tools and libraries via Homebrew (macOS)
+        if: matrix.platform.os == 'macos'
+        run: |
+          brew install \
+            bash \
+            lcov
+
+      - name: Install tools and libraries via MSYS2 (Windows)
+        if: matrix.platform.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          install: >
+            base-devel
+            git
+            mingw-w64-clang-x86_64-lcov
+            mingw-w64-clang-x86_64-toolchain
+
+      - name: Checkout nim-cozo sources
+        uses: actions/checkout@v3
+
+      - name: Calculate cache key components
+        id: cache-key
+        run: |
+          export CHOOSENIM_VERSION=$(curl -sSfL https://nim-lang.org/choosenim/stable)
+          echo "choosenim_version=${CHOOSENIM_VERSION}" >> ${GITHUB_OUTPUT}
+          tmpdir="$(mktemp -d)" && cd "${tmpdir}"
+          clone1b () {
+            echo "$1_commit=$( \
+              git clone --depth 1 $2 $1 \
+                        --branch $3 2>/dev/null && \
+              cd $1 && git rev-parse HEAD \
+              | cut -c1-10)" >> ${GITHUB_OUTPUT}
+          }
+          clone1b choosenim \
+                  https://github.com/dom96/choosenim.git \
+                  v${CHOOSENIM_VERSION}
+          clone1b nim \
+                  https://github.com/nim-lang/Nim.git \
+                  ${{ matrix.nim_version }}
+          if [[ ${{ matrix.platform.os }} = windows ]]; then
+            echo "bash_env=$(cygpath -m "${HOME}")/.bash_env" >> ${GITHUB_OUTPUT}
+            echo "choosenim=$(cygpath -m "${USERPROFILE}")/.choosenim" >> ${GITHUB_OUTPUT}
+            echo "nimble=$(cygpath -m "${HOME}")/.nimble" >> ${GITHUB_OUTPUT}
+          else
+            echo "bash_env=${HOME}/.bash_env" >> ${GITHUB_OUTPUT}
+            echo "choosenim=${HOME}/.choosenim" >> ${GITHUB_OUTPUT}
+            echo "nimble=${HOME}/.nimble" >> ${GITHUB_OUTPUT}
+          fi
+
+      - name: Restore artifacts from cache
+        id: artifacts-cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ steps.cache-key.outputs.bash_env }}
+            ${{ steps.cache-key.outputs.choosenim }}
+            ${{ steps.cache-key.outputs.nimble }}/bin
+          key: "${{ matrix.platform.os }}\
+                +choosenim:${{ steps.cache-key.outputs.choosenim_version }}\
+                +choosenim_commit:${{ steps.cache-key.outputs.choosenim_commit }}\
+                +nim:${{ matrix.nim_version }}\
+                +nim_commit:${{ steps.cache-key.outputs.nim_commit }}\
+                +cache:${{ matrix.cache_marker }}"
+
+      - name: Install choosenim and Nim
+        if: steps.artifacts-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${HOME}/Downloads" && cd "${HOME}/Downloads"
+          curl -sSf -O https://nim-lang.org/choosenim/init.sh
+          chmod +x init.sh
+          if [[ ${{ matrix.platform.os }} = windows ]]; then
+            mkdir -p "$(cygpath "${USERPROFILE}")/.nimble/bin"
+          fi
+          export CHOOSENIM_CHOOSE_VERSION=\#${{ steps.cache-key.outputs.nim_commit }}
+          export CHOOSENIM_NO_ANALYTICS=1
+          ./init.sh -y
+          if [[ ${{ matrix.platform.os }} = windows ]]; then
+            mv "$(cygpath "${USERPROFILE}")/.nimble" "${HOME}/"
+          fi
+          export NIMBLE_DIR="${HOME}/.nimble"
+          export PATH="${NIMBLE_DIR}/bin:${PATH}"
+          echo 'export NIMBLE_DIR="${HOME}/.nimble"' >> "${HOME}/.bash_env"
+          echo 'export PATH="${NIMBLE_DIR}/bin:${PATH}"' >> "${HOME}/.bash_env"
+          echo
+          nim --version
+          echo
+          nimble --version
+
+      # maybe can be reworked (along with caching logic) re: Nimble
+      # corresponding to Nim v2, with conditional logic for older Nim/Nimble
+      - name: Install project dependencies per Nimble
+        run: |
+          # delete broken symlinks, which can arise because e.g. the cache
+          # restored a symlink that points to an executable within
+          # ../pkgs/foo-1.2.3/ but the project's .nimble file has been updated
+          # to install foo-#head. In the case of a broken symlink, Nimble's
+          # auto-overwrite fails (only sometimes? only on macOS?)
+          source "${HOME}/.bash_env"
+          cd "${NIMBLE_DIR}/bin"
+          find -L . -type l -delete
+          cd -
+          source "${HOME}/.bash_env"
+          nimble --accept install --depsOnly
+
+      - name: Build examples
+        run: |
+          source "${HOME}/.bash_env"
+          extras/build_examples.sh
+          extras/build_examples.sh -d:release
+
+      - name: Build and run tests
+        run: |
+          source "${HOME}/.bash_env"
+          nimble --verbose test
+
+      - name: Calculate and report code coverage
+        run: |
+          source "${HOME}/.bash_env"
+          export CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }}
+          extras/coverage.sh

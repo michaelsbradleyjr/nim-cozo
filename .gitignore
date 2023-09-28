@@ -1,0 +1,17 @@
+.DS_Store
+/.idea
+/.vscode/**
+!/.vscode/settings.json
+/coverage
+/cozo.nims
+/examples/**
+!/examples/**/
+!/examples/**/*.nim
+!/examples/README.md
+!/examples/config.nims
+/extras/lsp
+/nimcache
+/tests/**
+!/tests/**/
+!/tests/**/*.nim
+!/tests/config.nims
