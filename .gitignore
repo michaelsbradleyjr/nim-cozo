@@ -4,6 +4,7 @@
 !/.vscode/settings.json
 /coverage
 /cozo.nims
+/data
 /examples/**
 !/examples/**/
 !/examples/**/*.nim
