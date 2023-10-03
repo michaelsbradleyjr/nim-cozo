@@ -1,6 +1,7 @@
 # nim-cozo
 
-[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](https://opensource.org/license/mpl-2-0)
+<!-- [![Nimble Package: cozo](https://img.shields.io/github/v/tag/michaelsbradleyjr/nim-cozo?filter=v*&logo=Nim&label=nimble&labelColor=black&color=f3d400)](https://nimble.directory/pkg/cozo) -->
+[![License: MPL-2.0](https://img.shields.io/badge/License-MPL%202.0-blue.svg)](https://opensource.org/license/mpl-2-0)
 [![Stability: experimental](https://img.shields.io/badge/Stability-experimental-orange.svg)](#stability)
 [![Builds (GitHub Actions)](https://github.com/michaelsbradleyjr/nim-cozo/actions/workflows/builds.yml/badge.svg?branch=master)](https://github.com/michaelsbradleyjr/nim-cozo/actions?query=workflow%3ABuilds+branch%3Amaster)
 [![codecov](https://codecov.io/github/michaelsbradleyjr/nim-cozo/branch/master/graph/badge.svg?token=7IYLT93PM3)](https://codecov.io/github/michaelsbradleyjr/nim-cozo)
