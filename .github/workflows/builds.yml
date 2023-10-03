@@ -68,6 +68,7 @@ jobs:
           install: >
             base-devel
             git
+            mingw-w64-clang-x86_64-jemalloc
             mingw-w64-clang-x86_64-lcov
             mingw-w64-clang-x86_64-rust
             mingw-w64-clang-x86_64-toolchain
