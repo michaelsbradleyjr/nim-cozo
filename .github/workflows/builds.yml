@@ -60,6 +60,7 @@ jobs:
             bash \
             lcov
 
+      # mingw-w64-clang-x86_64-jemalloc
       - name: Install tools and libraries via MSYS2 (Windows)
         if: matrix.platform.os == 'windows'
         uses: msys2/setup-msys2@v2
@@ -68,7 +69,6 @@ jobs:
           install: >
             base-devel
             git
-            mingw-w64-clang-x86_64-jemalloc
             mingw-w64-clang-x86_64-lcov
             mingw-w64-clang-x86_64-rust
             mingw-w64-clang-x86_64-toolchain
@@ -128,6 +128,7 @@ jobs:
                 +nim_commit:${{ steps.cache-key.outputs.nim_commit }}\
                 +cache:${{ matrix.cache_marker }}"
 
+      # not working on Windows+MSYS2 even with pkg installed: `-F jemalloc`
       - name: Checkout CozoDB sources and compile
         if: steps.artifacts-cache.outputs.cache-hit != 'true'
         run: |
@@ -139,7 +140,6 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO=fat \
           cargo build --release \
                       -F graph-algo \
-                      -F jemalloc \
                       -F requests \
                       -F storage-rocksdb \
                       -F storage-sqlite \
