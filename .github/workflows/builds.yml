@@ -36,6 +36,7 @@ jobs:
             os: windows,
             shell: msys2
           }
+        cozodb_version: [ v0.7.5 ]
         nim_version: [ v1.6.0, version-1-6, version-2-0, devel ]
     name: ${{ matrix.platform.icon }} ${{ matrix.platform.label }} - Nim ${{ matrix.nim_version }}
     runs-on: ${{ matrix.platform.os }}-latest
@@ -68,6 +69,7 @@ jobs:
             base-devel
             git
             mingw-w64-clang-x86_64-lcov
+            mingw-w64-clang-x86_64-rust
             mingw-w64-clang-x86_64-toolchain
 
       - name: Checkout nim-cozo sources
@@ -89,16 +91,21 @@ jobs:
           clone1b choosenim \
                   https://github.com/dom96/choosenim.git \
                   v${CHOOSENIM_VERSION}
+          clone1b cozodb \
+                  https://github.com/cozodb/cozo.git \
+                  ${{ matrix.cozodb_version }}
           clone1b nim \
                   https://github.com/nim-lang/Nim.git \
                   ${{ matrix.nim_version }}
           if [[ ${{ matrix.platform.os }} = windows ]]; then
             echo "bash_env=$(cygpath -m "${HOME}")/.bash_env" >> ${GITHUB_OUTPUT}
             echo "choosenim=$(cygpath -m "${USERPROFILE}")/.choosenim" >> ${GITHUB_OUTPUT}
+            echo "cozo=$(cygpath -m "${HOME}")/repos/cozo" >> ${GITHUB_OUTPUT}
             echo "nimble=$(cygpath -m "${HOME}")/.nimble" >> ${GITHUB_OUTPUT}
           else
             echo "bash_env=${HOME}/.bash_env" >> ${GITHUB_OUTPUT}
             echo "choosenim=${HOME}/.choosenim" >> ${GITHUB_OUTPUT}
+            echo "cozo=${HOME}/repos/cozo" >> ${GITHUB_OUTPUT}
             echo "nimble=${HOME}/.nimble" >> ${GITHUB_OUTPUT}
           fi
 
@@ -109,13 +116,33 @@ jobs:
           path: |
             ${{ steps.cache-key.outputs.bash_env }}
             ${{ steps.cache-key.outputs.choosenim }}
+            ${{ steps.cache-key.outputs.cozo }}
             ${{ steps.cache-key.outputs.nimble }}/bin
           key: "${{ matrix.platform.os }}\
                 +choosenim:${{ steps.cache-key.outputs.choosenim_version }}\
                 +choosenim_commit:${{ steps.cache-key.outputs.choosenim_commit }}\
+                +cozodb:${{ matrix.cozodb_version }}\
+                +cozodb_commit:${{ steps.cache-key.outputs.cozodb_commit }}\
                 +nim:${{ matrix.nim_version }}\
                 +nim_commit:${{ steps.cache-key.outputs.nim_commit }}\
                 +cache:${{ matrix.cache_marker }}"
+
+      - name: Checkout CozoDB sources and compile
+        if: steps.artifacts-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${HOME}/repos" && cd "${HOME}/repos"
+          git clone --depth 1 https://github.com/cozodb/cozo.git \
+                    --branch ${{ matrix.cozodb_version }}
+          cd cozo
+          git submodule update --init --recursive
+          CARGO_PROFILE_RELEASE_LTO=fat \
+          cargo build --release \
+                      -F graph-algo \
+                      -F jemalloc \
+                      -F requests \
+                      -F storage-rocksdb \
+                      -F storage-sqlite \
+                      -p cozo_c
 
       - name: Install choosenim and Nim
         if: steps.artifacts-cache.outputs.cache-hit != 'true'
@@ -160,16 +187,82 @@ jobs:
       - name: Build examples
         run: |
           source "${HOME}/.bash_env"
-          extras/build_examples.sh
-          extras/build_examples.sh -d:release
+          if [[ ${{ matrix.platform.os }} = macos ]]; then
+            extras/build_examples.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lc++ -liconv -framework Security -framework CoreFoundation"
+            extras/build_examples.sh -d:release \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lc++ -liconv -framework Security -framework CoreFoundation"
+          elif [[ ${{ matrix.platform.os }} = ubuntu ]]; then
+            extras/build_examples.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lm -lstdc++"
+            extras/build_examples.sh -d:release \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lm -lstdc++"
+          elif [[ ${{ matrix.platform.os }} = windows ]]; then
+            extras/build_examples.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"/clang64/lib/libc++.a" \
+              --passL:"-lRpcrt4 -lSHLWAPI -lbcrypt -lc++ -lntdll -lws2_32"
+            extras/build_examples.sh -d:release \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"/clang64/lib/libc++.a" \
+              --passL:"-lRpcrt4 -lSHLWAPI -lbcrypt -lc++ -lntdll -lws2_32"
+          else
+            exit 1
+          fi
 
       - name: Build and run tests
         run: |
           source "${HOME}/.bash_env"
-          nimble --verbose test
+          if [[ ${{ matrix.platform.os }} = macos ]]; then
+            nimble --verbose test \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lc++ -liconv -framework Security -framework CoreFoundation"
+          elif [[ ${{ matrix.platform.os }} = ubuntu ]]; then
+            nimble --verbose test \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lm -lstdc++"
+          elif [[ ${{ matrix.platform.os }} = windows ]]; then
+            nimble --verbose test \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"/clang64/lib/libc++.a" \
+              --passL:"-lRpcrt4 -lSHLWAPI -lbcrypt -lc++ -lntdll -lws2_32"
+          else
+            exit 1
+          fi
 
       - name: Calculate and report code coverage
         run: |
           source "${HOME}/.bash_env"
           export CODECOV_TOKEN=${{ secrets.CODECOV_TOKEN }}
-          extras/coverage.sh
+          if [[ ${{ matrix.platform.os }} = macos ]]; then
+            extras/coverage.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lc++ -liconv -framework Security -framework CoreFoundation"
+          elif [[ ${{ matrix.platform.os }} = ubuntu ]]; then
+            extras/coverage.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"-lm -lstdc++"
+          elif [[ ${{ matrix.platform.os }} = windows ]]; then
+            extras/coverage.sh \
+              --passC:"-I${HOME}/repos/cozo/cozo-lib-c" \
+              --passL:"${HOME}/repos/cozo/target/release/libcozo_c.a" \
+              --passL:"/clang64/lib/libc++.a" \
+              --passL:"-lRpcrt4 -lSHLWAPI -lbcrypt -lc++ -lntdll -lws2_32"
+          else
+            exit 1
+          fi
